@@ -35,7 +35,7 @@ from pg8000 import (
 from pg8000.errors import (
     NotSupportedError, ProgrammingError, InternalError, IntegrityError,
     OperationalError, DatabaseError, InterfaceError, Error,
-    CopyQueryOrTableRequiredError, CursorClosedError, QueryParameterParseError,
+    CopyQueryOrTableRequiredError, CursorClosedError,
     ArrayContentNotHomogenousError, ArrayContentEmptyError,
     ArrayDimensionsNotConsistentError, ArrayContentNotSupportedError, Warning,
     CopyQueryWithoutStreamError)
@@ -57,7 +57,7 @@ from itertools import count, islice
 from operator import itemgetter
 from pg8000.six.moves import map
 from pg8000.six import (
-    b, Iterator, PY2, binary_type, integer_types, next, PRE_26, text_type, u)
+    b, Iterator, PY2, binary_type, integer_types, PRE_26, text_type, u)
 from sys import exc_info
 import uuid
 from copy import deepcopy
@@ -65,7 +65,6 @@ from copy import deepcopy
 
 if PRE_26:
     bytearray = list
-
 
 statement_number_lock = threading.Lock()
 statement_number = 0
@@ -77,7 +76,7 @@ FC_TEXT = 0
 FC_BINARY = 1
 
 
-def convert_paramstyle(style, query):
+def convert_query(query):
     # I don't see any way to avoid scanning the query string char by char,
     # so we might as well take that careful approach and create a
     # state-based scanner.  We'll use int variables for the state.
@@ -93,17 +92,12 @@ def convert_paramstyle(style, query):
     INSIDE_PN = 4
 
     in_quote_escape = False
-    in_param_escape = False
     placeholders = []
     output_query = []
-    param_idx = map(lambda x: "$" + str(x), count(1))
     state = OUTSIDE
     prev_c = None
     for i, c in enumerate(query):
-        if i + 1 < len(query):
-            next_c = query[i + 1]
-        else:
-            next_c = None
+        next_c = None if i + 1 == len(query) else query[i + 1]
 
         if state == OUTSIDE:
             if c == "'":
@@ -115,36 +109,15 @@ def convert_paramstyle(style, query):
             elif c == '"':
                 output_query.append(c)
                 state = INSIDE_QI
-            elif style == "qmark" and c == "?":
-                output_query.append(next(param_idx))
-            elif style == "numeric" and c == ":":
-                output_query.append("$")
-            elif style == "named" and c == ":":
+            elif c == ":":
                 state = INSIDE_PN
                 placeholders.append('')
-            elif style == "pyformat" and c == '%' and next_c == "(":
-                state = INSIDE_PN
-                placeholders.append('')
-            elif style in ("format", "pyformat") and c == "%":
-                style = "format"
-                if in_param_escape:
-                    in_param_escape = False
-                    output_query.append(c)
-                else:
-                    if next_c == "%":
-                        in_param_escape = True
-                    elif next_c == "s":
-                        state = INSIDE_PN
-                        output_query.append(next(param_idx))
-                    else:
-                        raise QueryParameterParseError(
-                            "Only %s and %% are supported")
             else:
                 output_query.append(c)
 
         elif state == INSIDE_SQ:
+            output_query.append(c)
             if c == "'":
-                output_query.append(c)
                 if in_quote_escape:
                     in_quote_escape = False
                 else:
@@ -152,92 +125,43 @@ def convert_paramstyle(style, query):
                         in_quote_escape = True
                     else:
                         state = OUTSIDE
-            elif style in ("pyformat", "format") and c == "%":
-                # hm... we're only going to support an escaped percent sign
-                if in_param_escape:
-                    in_param_escape = False
-                    output_query.append(c)
-                else:
-                    if next_c == "%":
-                        in_param_escape = True
-                    else:
-                        raise QueryParameterParseError(
-                            "'%" + next_c + "' not supported in quoted string")
-            else:
-                output_query.append(c)
 
         elif state == INSIDE_QI:
+            output_query.append(c)
             if c == '"':
                 state = OUTSIDE
-                output_query.append(c)
-            elif style in ("pyformat", "format") and c == "%":
-                # hm... we're only going to support an escaped percent sign
-                if in_param_escape:
-                    in_param_escape = False
-                    output_query.append(c)
-                else:
-                    if next_c == "%":
-                        in_param_escape = True
-                    else:
-                        raise QueryParameterParseError(
-                            "'%" + next_c + "' not supported in quoted string")
-            else:
-                output_query.append(c)
 
         elif state == INSIDE_ES:
+            output_query.append(c)
             if c == "'" and prev_c != "\\":
                 # check for escaped single-quote
-                output_query.append(c)
                 state = OUTSIDE
-            elif style in ("pyformat", "format") and c == "%":
-                # hm... we're only going to support an escaped percent sign
-                if in_param_escape:
-                    in_param_escape = False
-                    output_query.append(c)
-                else:
-                    if next_c == "%":
-                        in_param_escape = True
-                    else:
-                        raise QueryParameterParseError(
-                            "'%" + next_c + "' not supported in quoted string")
-            else:
-                output_query.append(c)
 
         elif state == INSIDE_PN:
-            if style == 'named':
-                placeholders[-1] += c
-                if next_c is None or (not next_c.isalnum() and next_c != '_'):
-                    state = OUTSIDE
-                    try:
-                        pidx = placeholders.index(placeholders[-1], 0, -1)
-                        output_query.append("$" + str(pidx + 1))
-                        del placeholders[-1]
-                    except ValueError:
-                        output_query.append("$" + str(len(placeholders)))
-            elif style == 'pyformat':
-                if prev_c == ')' and c == "s":
-                    state = OUTSIDE
-                    try:
-                        pidx = placeholders.index(placeholders[-1], 0, -1)
-                        output_query.append("$" + str(pidx + 1))
-                        del placeholders[-1]
-                    except ValueError:
-                        output_query.append("$" + str(len(placeholders)))
-                elif c in "()":
-                    pass
-                else:
-                    placeholders[-1] += c
-            elif style == 'format':
+            placeholders[-1] += c
+            if next_c is None or (not next_c.isalnum() and next_c != '_'):
                 state = OUTSIDE
+                try:
+                    pidx = placeholders.index(placeholders[-1], 0, -1)
+                    output_query.append("$" + str(pidx + 1))
+                    del placeholders[-1]
+                except ValueError:
+                    output_query.append("$" + str(len(placeholders)))
 
         prev_c = c
 
-    if style in ('numeric', 'qmark', 'format'):
-        def make_args(args):
-            return () if args is None else args
-    else:
-        def make_args(args):
-            return tuple(args[p] for p in placeholders)
+    # Convert those that can be to ints
+    for i in range(len(placeholders)):
+        try:
+            placeholders[i] = int(placeholders[i]) - 1
+        except ValueError:
+            pass
+
+    def make_args(args):
+        params = []
+        for p in placeholders:
+            params.append(args[p])
+        return params
 
     return ''.join(output_query), make_args
 
@@ -332,7 +256,7 @@ class Cursor(Iterator):
     # or mapping and will be bound to variables in the operation.
     # <p>
     # Stability: Part of the DBAPI 2.0 specification.
-    def execute(self, operation, args=None, stream=None):
+    def execute(self, operation, values=None, stream=None):
         self._row_count = -1
 
         try:
@@ -346,8 +270,8 @@ class Cursor(Iterator):
         try:
             self._conn._unnamed_prepared_statement_lock.acquire()
             self._stmt = PreparedStatement(
-                self._conn, operation, args, statement_name="")
-            self._stmt.execute(args, stream=stream)
+                self._conn, operation, values, statement_name="")
+            self._stmt.execute(values, stream=stream)
         finally:
             self._conn._unnamed_prepared_statement_lock.release()
         self._row_count = self._stmt.row_count
@@ -1806,8 +1730,7 @@ class PreparedStatement(object):
         else:
             self.statement_name = statement_name
         self._cached_rows = deque()
-        self.statement, self.make_args = convert_paramstyle(
-            pg8000.paramstyle, query)
+        self.statement, self.make_args = convert_query(query)
         self.params = self.c.make_params(self.make_args(values))
         self.param_fcs = tuple(x[1] for x in self.params)
         self.statement_row_desc = None

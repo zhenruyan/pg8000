@@ -33,19 +33,19 @@ class Tests(unittest.TestCase):
                 "CREATE TEMPORARY TABLE t1 "
                 "(f1 int primary key, f2 int not null, f3 varchar(50) null)")
             c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (1, 1, None))
             c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (2, 10, None))
             c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (3, 100, None))
             c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (4, 1000, None))
             c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (5, 10000, None))
             self.db.commit()
         finally:
@@ -65,7 +65,7 @@ class Tests(unittest.TestCase):
                 if row is None:
                     break
                 f1, f2, f3 = row
-                c2.execute("SELECT f1, f2, f3 FROM t1 WHERE f1 > %s", (f1,))
+                c2.execute("SELECT f1, f2, f3 FROM t1 WHERE f1 > :1", (f1,))
                 while 1:
                     row = c2.fetchone()
                     if row is None:
@@ -76,22 +76,6 @@ class Tests(unittest.TestCase):
             c2.close()
 
         self.db.rollback()
-
-    def testQmark(self):
-        orig_paramstyle = dbapi.paramstyle
-        try:
-            dbapi.paramstyle = "qmark"
-            c1 = self.db.cursor()
-            c1.execute("SELECT f1, f2, f3 FROM t1 WHERE f1 > ?", (3,))
-            while 1:
-                row = c1.fetchone()
-                if row is None:
-                    break
-                f1, f2, f3 = row
-            self.db.rollback()
-        finally:
-            dbapi.paramstyle = orig_paramstyle
-            c1.close()
 
     def testNumeric(self):
         orig_paramstyle = dbapi.paramstyle
@@ -131,24 +115,7 @@ class Tests(unittest.TestCase):
         try:
             dbapi.paramstyle = "format"
             c1 = self.db.cursor()
-            c1.execute("SELECT f1, f2, f3 FROM t1 WHERE f1 > %s", (3,))
-            while 1:
-                row = c1.fetchone()
-                if row is None:
-                    break
-                f1, f2, f3 = row
-            self.db.commit()
-        finally:
-            dbapi.paramstyle = orig_paramstyle
-            c1.close()
-
-    def testPyformat(self):
-        orig_paramstyle = dbapi.paramstyle
-        try:
-            dbapi.paramstyle = "pyformat"
-            c1 = self.db.cursor()
-            c1.execute(
-                "SELECT f1, f2, f3 FROM t1 WHERE f1 > %(f1)s", {"f1": 3})
+            c1.execute("SELECT f1, f2, f3 FROM t1 WHERE f1 > :1", (3,))
             while 1:
                 row = c1.fetchone()
                 if row is None:
@@ -216,7 +183,7 @@ class Tests(unittest.TestCase):
                 c1.execute("SELECT * FROM t1")
                 self.assertEqual(5, c1.rowcount)
 
-                c1.execute("UPDATE t1 SET f3 = %s WHERE f2 > 101", ("Hello!",))
+                c1.execute("UPDATE t1 SET f3 = :1 WHERE f2 > 101", ("Hello!",))
                 self.assertEqual(2, c1.rowcount)
 
                 c1.execute("DELETE FROM t1")

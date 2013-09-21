@@ -24,7 +24,7 @@ Interactive Example
     >>> cursor.execute("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
 
     >>> cursor.execute(
-    ...     "INSERT INTO book (title) VALUES (%s), (%s) RETURNING id, title",
+    ...     "INSERT INTO book (title) VALUES (:1), (:2) RETURNING id, title",
     ...     ("Ender's Game", "Speaker for the Dead"))
     >>> results = cursor.fetchall()
     >>> for row in results:
@@ -39,12 +39,11 @@ Interactive Example
     [3.0]
 
     >>> import datetime
-    >>> cursor.execute("SELECT timestamp '2013-12-01 16:06' - %s",
+    >>> cursor.execute("SELECT timestamp '2013-12-01 16:06' - :1",
     ... (datetime.date(1980, 4, 27),))
     >>> cursor.fetchone()
     [<Interval 0 months 12271 days 57960000000 microseconds>]
 
-    >>> pg8000.paramstyle = "numeric"
     >>> cursor.execute("SELECT array_prepend(:1, :2)", ( 500, [1, 2, 3, 4], ))
     >>> cursor.fetchone()
     [[500, 1, 2, 3, 4]]

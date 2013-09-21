@@ -33,11 +33,11 @@ class Tests(unittest.TestCase):
         try:
             cursor = self.db.cursor()
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)", (1, 1, 1))
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)", (1, 1, 1))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)", (2, 2, 2))
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)", (2, 2, 2))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)", (3, 3, 3))
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)", (3, 3, 3))
 
             stream = BytesIO()
             cursor.copy_to(stream, "t1")

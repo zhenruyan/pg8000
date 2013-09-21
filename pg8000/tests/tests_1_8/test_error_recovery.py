@@ -34,7 +34,7 @@ class Tests(unittest.TestCase):
             c = self.db.cursor()
             try:
                 try:
-                    c.execute("SELECT %s as f1", (datetime.time(10, 30),))
+                    c.execute("SELECT :1 as f1", (datetime.time(10, 30),))
                     c.fetchall()
                     # shouldn't get here, exception should be thrown
                     self.fail()
@@ -45,7 +45,7 @@ class Tests(unittest.TestCase):
                 self.db.py_types[datetime.time] = orig
 
             # ensure that the connection is still usable for a new query
-            c.execute("VALUES ('hw3'::text)")
+            c.execute("VALUES (cast('hw3' as text))")
             self.assertEqual(c.fetchone()[0], "hw3")
         finally:
             c.close()

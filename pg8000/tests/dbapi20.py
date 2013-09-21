@@ -163,17 +163,6 @@ class DatabaseAPI20Test(unittest.TestCase):
         except AttributeError:
             self.fail("Driver doesn't define threadsafety")
 
-    def test_paramstyle(self):
-        try:
-            # Must exist
-            paramstyle = self.driver.paramstyle
-            # Must be a valid value
-            self.assertEqual(
-                paramstyle in (
-                    'qmark', 'numeric', 'named', 'format', 'pyformat'), True)
-        except AttributeError:
-            self.fail("Driver doesn't define paramstyle")
-
     def test_Exceptions(self):
         # Make sure required exceptions exist, and are in the
         # defined heirarchy.
@@ -374,28 +363,9 @@ class DatabaseAPI20Test(unittest.TestCase):
             self.table_prefix))
         self.assertEqual(cur.rowcount in (-1, 1), True)
 
-        if self.driver.paramstyle == 'qmark':
-            cur.execute(
-                'insert into %sbooze values (?)' % self.table_prefix,
-                ("Cooper's",))
-        elif self.driver.paramstyle == 'numeric':
-            cur.execute(
-                'insert into %sbooze values (:1)' % self.table_prefix,
-                ("Cooper's",))
-        elif self.driver.paramstyle == 'named':
-            cur.execute(
-                'insert into %sbooze values (:beer)' % self.table_prefix,
-                {'beer': "Cooper's"})
-        elif self.driver.paramstyle == 'format':
-            cur.execute(
-                'insert into %sbooze values (%%s)' % self.table_prefix,
-                ("Cooper's",))
-        elif self.driver.paramstyle == 'pyformat':
-            cur.execute(
-                'insert into %sbooze values (%%(beer)s)' % self.table_prefix,
-                {'beer': "Cooper's"})
-        else:
-            self.fail('Invalid paramstyle')
+        cur.execute(
+            'insert into %sbooze values (:beer)' % self.table_prefix,
+            {'beer': "Cooper's"})
         self.assertEqual(cur.rowcount in (-1, 1), True)
 
         cur.execute('select name from %sbooze' % self.table_prefix)
@@ -419,33 +389,8 @@ class DatabaseAPI20Test(unittest.TestCase):
             cur = con.cursor()
             self.executeDDL1(cur)
             largs = [("Cooper's",), ("Boag's",)]
-            margs = [{'beer': "Cooper's"}, {'beer': "Boag's"}]
-            if self.driver.paramstyle == 'qmark':
-                cur.executemany(
-                    'insert into %sbooze values (?)' % self.table_prefix,
-                    largs
-                    )
-            elif self.driver.paramstyle == 'numeric':
-                cur.executemany(
-                    'insert into %sbooze values (:1)' % self.table_prefix,
-                    largs
-                    )
-            elif self.driver.paramstyle == 'named':
-                cur.executemany(
-                    'insert into %sbooze values (:beer)' % self.table_prefix,
-                    margs
-                    )
-            elif self.driver.paramstyle == 'format':
-                cur.executemany(
-                    'insert into %sbooze values (%%s)' % self.table_prefix,
-                    largs
-                    )
-            elif self.driver.paramstyle == 'pyformat':
-                cur.executemany(
-                    'insert into %sbooze values (%%(beer)s)' % (
-                        self.table_prefix), margs)
-            else:
-                self.fail('Unknown paramstyle')
+            cur.executemany(
+                'insert into %sbooze values (:1)' % self.table_prefix, largs)
             self.assertEqual(
                 cur.rowcount in (-1, 2), True,
                 'insert using cursor.executemany set cursor.rowcount to '

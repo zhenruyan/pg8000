@@ -52,19 +52,19 @@ class Tests(unittest.TestCase):
         try:
             cursor = self.db.cursor()
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (1, 1, None))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (2, 10, None))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (3, 100, None))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (4, 1000, None))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (5, 10000, None))
             try:
                 c1 = self.db.cursor()
@@ -73,7 +73,7 @@ class Tests(unittest.TestCase):
                 for row in c1:
                     f1, f2, f3 = row
                     c2.execute(
-                        "SELECT f1, f2, f3 FROM t1 WHERE f1 > %s", (f1,))
+                        "SELECT f1, f2, f3 FROM t1 WHERE f1 > :1", (f1,))
                     for row in c2:
                         f1, f2, f3 = row
             finally:
@@ -90,10 +90,10 @@ class Tests(unittest.TestCase):
 
             # Test INSERT ... RETURNING with one row...
             cursor.execute(
-                "INSERT INTO t2 (data) VALUES (%s) RETURNING id",
+                "INSERT INTO t2 (data) VALUES (:1) RETURNING id",
                 ("test1",))
             row_id = cursor.fetchone()[0]
-            cursor.execute("SELECT data FROM t2 WHERE id = %s", (row_id,))
+            cursor.execute("SELECT data FROM t2 WHERE id = :1", (row_id,))
             self.assertEqual("test1", cursor.fetchone()[0])
 
             # In PostgreSQL 8.4 we don't know the row count for a select
@@ -102,7 +102,7 @@ class Tests(unittest.TestCase):
 
             # Test with multiple rows...
             cursor.execute(
-                "INSERT INTO t2 (data) VALUES (%s), (%s), (%s) "
+                "INSERT INTO t2 (data) VALUES (:1), (:2), (:3) "
                 "RETURNING id", ("test2", "test3", "test4"))
             self.assertEqual(cursor.rowcount, 3)
             ids = tuple([x[0] for x in cursor])
@@ -120,7 +120,7 @@ class Tests(unittest.TestCase):
             def test(left, right):
                 for i in range(left, right):
                     cursor.execute(
-                        "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                        "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                         (i, id(threading.currentThread()), None))
             t1 = threading.Thread(target=test, args=(1, 25))
             t2 = threading.Thread(target=test, args=(25, 50))
@@ -142,7 +142,7 @@ class Tests(unittest.TestCase):
                 cursor = self.db.cursor()
                 expected_count = 57
                 cursor.executemany(
-                    "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                    "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                     tuple((i, i, None) for i in range(expected_count)))
                 self.db.commit()
 
@@ -182,21 +182,21 @@ class Tests(unittest.TestCase):
         try:
             cursor = self.db.cursor()
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (1, 1, None))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (2, 10, None))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (3, 100, None))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (4, 1000, None))
             cursor.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (%s, %s, %s)",
+                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
                 (5, 10000, None))
-            cursor.execute("UPDATE t1 SET f3 = %s WHERE f2 > 101", ("Hello!",))
+            cursor.execute("UPDATE t1 SET f3 = :1 WHERE f2 > 101", ("Hello!"))
             self.assertEqual(cursor.rowcount, 2)
         finally:
             cursor.close()
@@ -207,7 +207,7 @@ class Tests(unittest.TestCase):
             cursor = self.db.cursor()
             # https://bugs.launchpad.net/pg8000/+bug/230796
             cursor.execute(
-                "SELECT typname FROM pg_type WHERE oid = %s", (100,))
+                "SELECT typname FROM pg_type WHERE oid = :1", (100,))
         finally:
             cursor.close()
             self.db.rollback()

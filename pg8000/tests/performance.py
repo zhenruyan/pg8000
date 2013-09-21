@@ -7,14 +7,14 @@ from decimal import Decimal
 
 
 tests = (
-        ("(id / 100)::int2", 'int2'),
-        ("id::int4", 'int4'),
-        ("(id * 100)::int8", 'int8'),
-        ("(id %% 2) = 0", 'bool'),
+        ("cast((id / 100) as int2)", 'int2'),
+        ("cast(id as int4)", 'int4'),
+        ("cast((id * 100) as int8)", 'int8'),
+        ("(id % 2) = 0", 'bool'),
         ("N'Static text string'", 'txt'),
-        ("id / 100::float4", 'float4'),
-        ("id / 100::float8", 'float8'),
-        ("id / 100::numeric", 'numeric'),
+        ("cast(id / 100 as float4)", 'float4'),
+        ("cast(id / 100 as float8)", 'float8'),
+        ("cast(id / 100 as numeric)", 'numeric'),
 )
 
 with warnings.catch_warnings(), closing(pg8000.connect(**db_connect)) as db:
@@ -45,7 +45,7 @@ with warnings.catch_warnings(), closing(pg8000.connect(**db_connect)) as db:
     for i in range(1, 5):
         begin_time = time.time()
         cursor.executemany(
-            "insert into t1 (f2, f3, f4) values (%s, %s, %s)", params)
+            "insert into t1 (f2, f3, f4) values (:1, :2, :3)", params)
         db.commit()
         end_time = time.time()
         print("Attempt {0} took {1} seconds.".format(i, end_time - begin_time))
