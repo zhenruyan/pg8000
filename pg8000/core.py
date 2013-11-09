@@ -57,10 +57,11 @@ from itertools import count, islice
 from operator import itemgetter
 from pg8000.six.moves import map
 from pg8000.six import (
-    b, Iterator, PY2, binary_type, integer_types, PRE_26, text_type, u)
+    b, Iterator, PY2, binary_type, integer_types, PRE_26, text_type, u, next)
 from sys import exc_info
 import uuid
 from copy import deepcopy
+from itertools import islice
 
 
 if PRE_26:
@@ -257,24 +258,28 @@ class Cursor(Iterator):
     # <p>
     # Stability: Part of the DBAPI 2.0 specification.
     def execute(self, operation, values=None, stream=None):
-        self._row_count = -1
-
         try:
+            self._conn._unnamed_prepared_statement_lock.acquire()
+            self._row_count = -1
             self._conn.begin()
+            self._stmt = PreparedStatement(
+                self._conn, operation, values, statement_name="")
+            self._stmt.execute(values, stream=stream)
+            self._row_count = self._stmt.row_count
+
+            if len(self._stmt.portal_row_desc) > 0:
+                return self
+            elif self._row_count == -1:
+                return None
+            else:
+                return self._row_count
         except AttributeError:
             if self._conn is None:
                 raise InterfaceError("Cursor closed")
             else:
                 raise exc_info()[1]
-
-        try:
-            self._conn._unnamed_prepared_statement_lock.acquire()
-            self._stmt = PreparedStatement(
-                self._conn, operation, values, statement_name="")
-            self._stmt.execute(values, stream=stream)
         finally:
             self._conn._unnamed_prepared_statement_lock.release()
-        self._row_count = self._stmt.row_count
 
     ##
     # Prepare a database operation and then execute it against all parameter
@@ -386,6 +391,18 @@ class Cursor(Iterator):
                 raise StopIteration()
         except AttributeError:
             raise ProgrammingError("attempting to use unexecuted cursor")
+
+    def fetchone(self):
+        try:
+            return next(self)
+        except StopIteration:
+            return None
+
+    def fetchall(self):
+        return tuple(self)
+
+    def fetchmany(self, num=None):
+        return tuple(islice(self, self.arraysize if num is None else num))
 
     def __iter__(self):
         return self

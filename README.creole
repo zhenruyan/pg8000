@@ -1,6 +1,37 @@
 =pg8000
 
-pg8000 is a pure-[[http://www.python.org/|Python]]
+This is an experimental version of PG8000 which implements some suggestions
+for [[https://wiki.python.org/moin/DbApi3|DB-API 3]]. The differences from
+DBAPI 2.0 are:
+
+* The paramstyle property is removed, and parameter labels are either :1 if the
+    arguments are a sequence, or :name if the arguments are a mapping.
+* The cursor execute() method returns self, so you can iterate over the result
+    of an execute().
+
+{{{
+
+>>> import pg8000
+>>>
+>>> conn = pg8000.connect(user='postgres', password='password')
+>>> cur = conn.cursor()
+>>> cur.execute("create temporary table emps (id int, name varchar)")
+>>> cur.execute("insert into emps values (1, 'Camilla')")
+1
+>>> conn.commit()
+>>> for row in cur.execute("select * from emps where id = :1", (1,)):
+...     print(row)
+[1, 'Camilla']
+>>>
+>>> for row in cur.execute(
+...         "select * from emps where name = :name", {'name': 'Camilla'}):
+...     print(row)
+[1, 'Camilla']
+>>> conn.commit()
+
+}}}
+
+PG8000 is a pure-[[http://www.python.org/|Python]]
 [[http://www.postgresql.org/|PostgreSQL]] driver that complies with
 [[http://www.python.org/dev/peps/pep-0249/|DB-API 2.0]]. The driver
 communicates with the database using the
@@ -8,6 +39,62 @@ communicates with the database using the
 
 For more information, please see the
 [[https://pypi.python.org/pypi/pg8000|documentation]].
+=======
+* CPython 2.5
+* CPython 2.6
+* CPython 2.7
+* CPython 3.2
+* CPython 3.3
+* PyPy
+* Jython 2.5
+
+==Usage
+
+{{{
+
+>>> from pg8000 import connect
+>>> conn = connect(user='postgres', password='password')
+
+}}}
+
+The {{{connect}}} function takes the following parameters:
+
+|=parameter    |=default |
+|user          |         |
+|host          |localhost|
+|unix_sock     |         |
+|port          |5432     |
+|database      |         |
+|password      |         |
+|socket_timeout|60       |
+|ssl           |False    |
+
+{{{
+
+>>> cur = conn.cursor()
+>>> cur.execute("create temporary table example (id int, name varchar)")
+>>> cur.execute("insert into example values (1, 'hello')")
+1
+>>> conn.commit()
+>>> for row in cur.execute("select * from example where id = :1", (1,)):
+...     print(row)
+[1, 'hello']
+>>> cur.close()
+>>> conn.commit()
+
+}}}
+
+Following the DB-API specification, autocommit is off by default. It can be
+turned on by using the {{{autocommit}}} property of the connection.
+
+{{{
+
+>>> conn.autocommit = True
+>>> cur = conn.cursor()
+>>> cur.execute("vacuum")
+>>> conn.autocommit = False
+
+}}}
 
 =Regression Tests
 

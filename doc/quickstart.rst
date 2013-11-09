@@ -23,10 +23,9 @@ Interactive Example
     >>> cursor = conn.cursor()
     >>> cursor.execute("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
 
-    >>> cursor.execute(
+    >>> results = cursor.execute(
     ...     "INSERT INTO book (title) VALUES (:1), (:2) RETURNING id, title",
     ...     ("Ender's Game", "Speaker for the Dead"))
-    >>> results = cursor.fetchall()
     >>> for row in results:
     ...     id, title = row
     ...     print("id = %s, title = %s" % (id, title))
@@ -34,18 +33,16 @@ Interactive Example
     id = 2, title = Speaker for the Dead
     >>> conn.commit()
 
-    >>> cursor.execute("SELECT extract(millennium from now())")
-    >>> cursor.fetchone()
+    >>> cursor.execute("SELECT extract(millennium from now())").fetchone()
     [3.0]
 
     >>> import datetime
     >>> cursor.execute("SELECT timestamp '2013-12-01 16:06' - :1",
-    ... (datetime.date(1980, 4, 27),))
-    >>> cursor.fetchone()
+    ... (datetime.date(1980, 4, 27),)).fetchone()
     [<Interval 0 months 12271 days 57960000000 microseconds>]
 
-    >>> cursor.execute("SELECT array_prepend(:1, :2)", ( 500, [1, 2, 3, 4], ))
-    >>> cursor.fetchone()
+    >>> cursor.execute("SELECT array_prepend(:1, :2)",
+    ... ( 500, [1, 2, 3, 4], )).fetchone()
     [[500, 1, 2, 3, 4]]
     >>> conn.rollback()
 
