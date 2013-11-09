@@ -6,7 +6,9 @@ DBAPI 2.0 are:
 
 * The paramstyle property is removed, and parameter labels are either :1 if the
     arguments are a sequence, or :name if the arguments are a mapping.
-* The cursor execute() method returns self, so you can iterate over the result
+* An iterable cursor is part of the core DB-API specification, so no warning is
+    given when using it.
+* The cursor's execute() method returns self, so you can iterate over the result
     of an execute().
 
 {{{
