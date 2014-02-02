@@ -18,100 +18,70 @@ class Tests(unittest.TestCase):
             time.tzset()
 
         try:
-            c = self.db.cursor()
-            try:
-                c = self.db.cursor()
-                c.execute("DROP TABLE t1")
-            except pg8000.DatabaseError:
-                e = exc_info()[1]
-                # the only acceptable error is:
-                self.assertEqual(e.args[1], b('42P01'))  # table does not exist
-                self.db.rollback()
-            c.execute(
-                "CREATE TEMPORARY TABLE t1 "
-                "(f1 int primary key, f2 int not null, f3 varchar(50) null)")
-            c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
-                (1, 1, None))
-            c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
-                (2, 10, None))
-            c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
-                (3, 100, None))
-            c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
-                (4, 1000, None))
-            c.execute(
-                "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
-                (5, 10000, None))
-            self.db.commit()
-        finally:
-            c.close()
+            self.db.execute("DROP TABLE t1")
+        except pg8000.DatabaseError:
+            e = exc_info()[1]
+            # the only acceptable error is:
+            self.assertEqual(e.args[1], b('42P01'))  # table does not exist
+            self.db.rollback()
+        self.db.execute(
+            "CREATE TEMPORARY TABLE t1 "
+            "(f1 int primary key, f2 int not null, f3 varchar(50) null)")
+        self.db.execute(
+            "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
+            (1, 1, None))
+        self.db.execute(
+            "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
+            (2, 10, None))
+        self.db.execute(
+            "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
+            (3, 100, None))
+        self.db.execute(
+            "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
+            (4, 1000, None))
+        self.db.execute(
+            "INSERT INTO t1 (f1, f2, f3) VALUES (:1, :2, :3)",
+            (5, 10000, None))
+        self.db.commit()
 
     def tearDown(self):
         self.db.close()
 
     def testParallelQueries(self):
-        try:
-            c1 = self.db.cursor()
-            c2 = self.db.cursor()
-
-            c1.execute("SELECT f1, f2, f3 FROM t1")
+        ps1 = self.db.execute("SELECT f1, f2, f3 FROM t1")
+        while 1:
+            row = ps1.fetchone()
+            if row is None:
+                break
+            f1, f2, f3 = row
+            ps2 = self.db.execute(
+                "SELECT f1, f2, f3 FROM t1 WHERE f1 > :1", (f1,))
             while 1:
-                row = c1.fetchone()
+                row = ps2.fetchone()
                 if row is None:
                     break
                 f1, f2, f3 = row
-                c2.execute("SELECT f1, f2, f3 FROM t1 WHERE f1 > :1", (f1,))
-                while 1:
-                    row = c2.fetchone()
-                    if row is None:
-                        break
-                    f1, f2, f3 = row
-        finally:
-            c1.close()
-            c2.close()
 
         self.db.rollback()
 
     def testNumeric(self):
-        c1 = self.db.cursor()
-        try:
-            c1.execute("SELECT f1, f2, f3 FROM t1 WHERE f1 > :1", (3,))
-            while 1:
-                row = c1.fetchone()
-                if row is None:
-                    break
-                f1, f2, f3 = row
-            self.db.rollback()
-        finally:
-            c1.close()
+        ps = self.db.execute("SELECT f1, f2, f3 FROM t1 WHERE f1 > :1", (3,))
+        while 1:
+            row = ps.fetchone()
+            if row is None:
+                break
+            f1, f2, f3 = row
+        self.db.rollback()
 
     def testNamed(self):
-        try:
-            c1 = self.db.cursor()
-            c1.execute(
-                "SELECT f1, f2, f3 FROM t1 WHERE f1 > :f1", {"f1": 3})
-            while 1:
-                row = c1.fetchone()
-                if row is None:
-                    break
-                f1, f2, f3 = row
-            self.db.rollback()
-        finally:
-            c1.close()
-
-    def testArraysize(self):
-        try:
-            c1 = self.db.cursor()
-            c1.arraysize = 3
-            c1.execute("SELECT * FROM t1")
-            retval = c1.fetchmany()
-            self.assertEqual(len(retval), c1.arraysize)
-        finally:
-            c1.close()
-        self.db.commit()
+        ps = self.db.execute(
+            "SELECT f1, f2, f3 FROM t1 WHERE f1 > :f1", {"f1": 3})
+        while 1:
+            row = ps.fetchone()
+            if row is None:
+                break
+            f1, f2, f3 = row
+        self.db.rollback()
 
     def testDate(self):
         val = pg8000.Date(2001, 2, 3)
@@ -152,34 +122,25 @@ class Tests(unittest.TestCase):
         self.assertTrue(isinstance(v, pg8000.BINARY))
 
     def testRowCount(self):
-        try:
-            c1 = self.db.cursor()
-            c1.execute("SELECT * FROM t1")
+        ps = self.db.execute("SELECT * FROM t1")
 
-            # In PostgreSQL 8.4 we don't know the row count for a select
-            if not self.db._server_version.startswith("8.4"):
-                self.assertEqual(5, c1.rowcount)
+        # In PostgreSQL 8.4 we don't know the row count for a select
+        if not self.db._server_version.startswith("8.4"):
+            self.assertEqual(5, ps.rowcount)
 
-            c1.execute("UPDATE t1 SET f3 = :1 WHERE f2 > 101", "Hello!")
-            self.assertEquals(2, c1.rowcount)
+        ps = self.db.execute("UPDATE t1 SET f3 = :1 WHERE f2 > 101", "Hello!")
+        self.assertEquals(2, ps.rowcount)
 
-            c1.execute("DELETE FROM t1")
-            self.assertEqual(5, c1.rowcount)
-        finally:
-            c1.close()
+        ps = self.db.execute("DELETE FROM t1")
+        self.assertEqual(5, ps.rowcount)
         self.db.commit()
 
     def testFetchMany(self):
-        try:
-            cursor = self.db.cursor()
-            cursor.arraysize = 2
-            cursor.execute("SELECT * FROM t1")
-            self.assertEqual(2, len(cursor.fetchmany()))
-            self.assertEqual(2, len(cursor.fetchmany()))
-            self.assertEqual(1, len(cursor.fetchmany()))
-            self.assertEqual(0, len(cursor.fetchmany()))
-        finally:
-            cursor.close()
+        ps = self.db.execute("SELECT * FROM t1")
+        self.assertEqual(2, len(ps.fetchmany(2)))
+        self.assertEqual(2, len(ps.fetchmany(2)))
+        self.assertEqual(1, len(ps.fetchmany(2)))
+        self.assertEqual(0, len(ps.fetchmany(2)))
         self.db.commit()
 
     def testIterator(self):
@@ -187,16 +148,12 @@ class Tests(unittest.TestCase):
         filterwarnings("ignore", "DB-API extension cursor.next()")
         filterwarnings("ignore", "DB-API extension cursor.__iter__()")
 
-        try:
-            cursor = self.db.cursor()
-            cursor.execute("SELECT * FROM t1 ORDER BY f1")
-            f1 = 0
-            for row in cursor:
-                next_f1 = row[0]
-                assert next_f1 > f1
-                f1 = next_f1
-        except:
-            cursor.close()
+        ps = self.db.execute("SELECT * FROM t1 ORDER BY f1")
+        f1 = 0
+        for row in ps:
+            next_f1 = row[0]
+            assert next_f1 > f1
+            f1 = next_f1
 
         self.db.commit()
 
@@ -204,11 +161,7 @@ class Tests(unittest.TestCase):
     # autocommit on.
     def testVacuum(self):
         self.db.autocommit = True
-        try:
-            cursor = self.db.cursor()
-            cursor.execute("vacuum")
-        finally:
-            cursor.close()
+        self.db.execute("vacuum")
 
 if __name__ == "__main__":
     unittest.main()

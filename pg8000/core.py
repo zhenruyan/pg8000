@@ -35,13 +35,11 @@ from pg8000 import (
 from pg8000.errors import (
     NotSupportedError, ProgrammingError, InternalError, IntegrityError,
     OperationalError, DatabaseError, InterfaceError, Error,
-    CopyQueryOrTableRequiredError, CursorClosedError,
-    ArrayContentNotHomogenousError, ArrayContentEmptyError,
-    ArrayDimensionsNotConsistentError, ArrayContentNotSupportedError, Warning,
-    CopyQueryWithoutStreamError)
+    CopyQueryOrTableRequiredError, ArrayContentNotHomogenousError,
+    ArrayContentEmptyError, ArrayDimensionsNotConsistentError,
+    ArrayContentNotSupportedError, Warning, CopyQueryWithoutStreamError)
 from warnings import warn
 import socket
-import threading
 from struct import pack, Struct
 from hashlib import md5
 from decimal import Decimal
@@ -53,7 +51,6 @@ from pg8000 import (
     bh_unpack, ihihih_unpack, cccc_unpack, ii_pack, iii_pack, dii_pack,
     qii_pack)
 from collections import deque, defaultdict
-from itertools import count, islice
 from operator import itemgetter
 from pg8000.six.moves import map
 from pg8000.six import (
@@ -67,11 +64,6 @@ from itertools import islice
 if PRE_26:
     bytearray = list
 
-statement_number_lock = threading.Lock()
-statement_number = 0
-
-portal_number_lock = threading.Lock()
-portal_number = 0
 
 FC_TEXT = 0
 FC_BINARY = 1
@@ -165,253 +157,6 @@ def convert_query(query):
         return params
 
     return ''.join(output_query), make_args
-
-
-def require_open_cursor(fn):
-    def _fn(self, *args, **kwargs):
-        if self._conn is None:
-            raise CursorClosedError()
-        return fn(self, *args, **kwargs)
-    return _fn
-
-
-##
-# The class of object returned by the {@link #ConnectionWrapper.cursor cursor
-# method}.
-# The Cursor class allows multiple queries to be performed concurrently with a
-# single PostgreSQL connection.  The Cursor object is implemented internally by
-# using a {@link PreparedStatement PreparedStatement} object, so if you plan to
-# use a statement multiple times, you might as well create a PreparedStatement
-# and save a small amount of reparsing time.
-# <p>
-# As of v1.01, instances of this class are thread-safe.  See {@link
-# PreparedStatement PreparedStatement} for more information.
-# <p>
-# Stability: Added in v1.00, stability guaranteed for v1.xx.
-#
-# @param connection     An instance of {@link Connection Connection}.
-class Cursor(Iterator):
-    def __init__(self, connection):
-        self._conn = connection
-        self._stmt = None
-        self.arraysize = 1
-        self._row_count = -1
-
-    def require_stmt(func):
-        def retval(self, *args, **kwargs):
-            if self._stmt is None:
-                raise ProgrammingError("attempting to use unexecuted cursor")
-            return func(self, *args, **kwargs)
-        return retval
-
-    ##
-    # This read-only attribute returns a reference to the connection object on
-    # which the cursor was created.
-    # <p>
-    # Stability: Part of a DBAPI 2.0 extension.  A warning "DB-API extension
-    # cursor.connection used" will be fired.
-    @property
-    def connection(self):
-        warn("DB-API extension cursor.connection used", stacklevel=3)
-        return self._conn
-
-    ##
-    # This read-only attribute specifies the number of rows that the last
-    # .execute*() produced (for DQL statements like 'select') or affected (for
-    # DML statements like 'update' or 'insert').
-    # <p>
-    # The attribute is -1 in case no .execute*() has been performed on the
-    # cursor or the rowcount of the last operation is cannot be determined by
-    # the interface.
-    # <p>
-    # Stability: Part of the DBAPI 2.0 specification.
-    @property
-    def rowcount(self):
-        return self._row_count
-
-    ##
-    # This read-only attribute is a sequence of 7-item sequences.  Each value
-    # contains information describing one result column.  The 7 items returned
-    # for each column are (name, type_code, display_size, internal_size,
-    # precision, scale, null_ok).  Only the first two values are provided by
-    # this interface implementation.
-    # <p>
-    # Stability: Part of the DBAPI 2.0 specification.
-    description = property(lambda self: self._getDescription())
-
-    @require_open_cursor
-    def _getDescription(self):
-        if self._stmt is None:
-            return None
-        row_desc = self._stmt.get_row_description()
-        if row_desc is None or len(row_desc) == 0:
-            return None
-        columns = []
-        for col in row_desc:
-            columns.append(
-                (col["name"], col["type_oid"], None, None, None, None, None))
-        return columns
-
-    ##
-    # Executes a database operation.  Parameters may be provided as a sequence
-    # or mapping and will be bound to variables in the operation.
-    # <p>
-    # Stability: Part of the DBAPI 2.0 specification.
-    def execute(self, operation, values=None, stream=None):
-        try:
-            self._conn._unnamed_prepared_statement_lock.acquire()
-            self._row_count = -1
-            self._conn.begin()
-            self._stmt = PreparedStatement(
-                self._conn, operation, values, statement_name="")
-            self._stmt.execute(values, stream=stream)
-            self._row_count = self._stmt.row_count
-
-            if len(self._stmt.portal_row_desc) > 0:
-                return self
-            elif self._row_count == -1:
-                return None
-            else:
-                return self._row_count
-        except AttributeError:
-            if self._conn is None:
-                raise InterfaceError("Cursor closed")
-            else:
-                raise exc_info()[1]
-        finally:
-            self._conn._unnamed_prepared_statement_lock.release()
-
-    ##
-    # Prepare a database operation and then execute it against all parameter
-    # sequences or mappings provided.
-    # <p>
-    # Stability: Part of the DBAPI 2.0 specification.
-    @require_open_cursor
-    def executemany(self, operation, parameter_sets):
-        self._row_count = -1
-        self._conn.begin()
-        try:
-            self._conn._unnamed_prepared_statement_lock.acquire()
-            self._stmt = PreparedStatement(
-                self._conn, operation, parameter_sets[0], statement_name="")
-            for parameters in parameter_sets:
-                self._stmt.execute(parameters)
-                if self._stmt.row_count == -1:
-                    self._row_count = -1
-                elif self._row_count == -1:
-                    self._row_count = self._stmt.row_count
-                else:
-                    self._row_count += self._stmt.row_count
-        finally:
-            self._conn._unnamed_prepared_statement_lock.release()
-
-    def copy_from(self, fileobj, table=None, sep='\t', null=None, query=None):
-        if query is None:
-            if table is None:
-                raise CopyQueryOrTableRequiredError()
-            query = "COPY %s FROM stdout DELIMITER '%s'" % (table, sep)
-            if null is not None:
-                query += " NULL '%s'" % (null,)
-        self.copy_execute(fileobj, query)
-
-    def copy_to(self, fileobj, table=None, sep='\t', null=None, query=None):
-        if query is None:
-            if table is None:
-                raise CopyQueryOrTableRequiredError()
-            query = "COPY %s TO stdout DELIMITER '%s'" % (table, sep)
-            if null is not None:
-                query += " NULL '%s'" % (null,)
-        self.copy_execute(fileobj, query)
-
-    @require_open_cursor
-    def copy_execute(self, fileobj, query):
-        self.execute(query, stream=fileobj)
-
-    ##
-    # Fetch the next row of a query result set, returning a single sequence, or
-    # None when no more data is available.
-    # <p>
-    # Stability: Part of the DBAPI 2.0 specification.
-    def fetchone(self):
-        try:
-            return next(self)
-        except StopIteration:
-            return None
-
-    ##
-    # Fetch the next set of rows of a query result, returning a sequence of
-    # sequences.  An empty sequence is returned when no more rows are
-    # available.
-    # <p>
-    # Stability: Part of the DBAPI 2.0 specification.
-    # @param size   The number of rows to fetch when called.  If not provided,
-    #               the arraysize property value is used instead.
-    def fetchmany(self, num=None):
-        return tuple(islice(self, self.arraysize if num is None else num))
-
-    ##
-    # Fetch all remaining rows of a query result, returning them as a sequence
-    # of sequences.
-    # <p>
-    # Stability: Part of the DBAPI 2.0 specification.
-    def fetchall(self):
-        return tuple(self)
-
-    ##
-    # Close the cursor.
-    # <p>
-    # Stability: Part of the DBAPI 2.0 specification.
-    @require_open_cursor
-    def close(self):
-        if self._stmt is not None:
-            self._stmt.close()
-            self._stmt = None
-        self._conn = None
-
-    def __next__(self):
-        try:
-            self._stmt._lock.acquire()
-            return self._stmt._cached_rows.popleft()
-        except IndexError:
-            if self._stmt.portal_suspended:
-                try:
-                    self._conn._sock_lock.acquire()
-                    self._conn.send_EXECUTE(
-                        self._stmt, PreparedStatement.row_cache_size)
-                    self._conn.handle_messages(self._stmt)
-                finally:
-                    self._conn._sock_lock.release()
-
-            try:
-                return self._stmt._cached_rows.popleft()
-            except IndexError:
-                if len(self._stmt.portal_row_desc) == 0:
-                    raise ProgrammingError("no result set")
-                self._conn.close_portal(self._stmt)
-                raise StopIteration()
-        except AttributeError:
-            raise ProgrammingError("attempting to use unexecuted cursor")
-
-    def fetchone(self):
-        try:
-            return next(self)
-        except StopIteration:
-            return None
-
-    def fetchall(self):
-        return tuple(self)
-
-    def fetchmany(self, num=None):
-        return tuple(islice(self, self.arraysize if num is None else num))
-
-    def __iter__(self):
-        return self
-
-    def setinputsizes(self, sizes):
-        pass
-
-    def setoutputsize(self, size, column=None):
-        pass
 
 
 # Message codes
@@ -556,11 +301,13 @@ class Connection(object):
         self._commands_with_count = (
             b("INSERT"), b("DELETE"), b("UPDATE"), b("MOVE"),
             b("FETCH"), b("COPY"), b("SELECT"))
-        self._sock_lock = threading.Lock()
         self.user = user
         self.password = password
         self.autocommit = False
         self.binding = False
+        self.statement_number = 0
+        self.portal_number = 0
+        self.arraysize = 1
         try:
             if unix_sock is None and host is not None:
                 self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -580,7 +327,6 @@ class Connection(object):
 
             if ssl:
                 try:
-                    self._sock_lock.acquire()
                     import ssl as sslmodule
                     # Int32(8) - Message length, including self.
                     # Int32(80877103) - The SSL request code.
@@ -594,8 +340,6 @@ class Connection(object):
                     raise InterfaceError(
                         "SSL required but ssl module not available in "
                         "this python installation")
-                finally:
-                    self._sock_lock.release()
 
             # settimeout causes ssl failure, on windows.  Python bug 1462352.
             self._sock.settimeout(socket_timeout)
@@ -907,22 +651,16 @@ class Connection(object):
         self._flush()
 
         try:
-            try:
-                self._sock_lock.acquire()
-                self.handle_messages()
-            finally:
-                self._sock_lock.release()
+            self.handle_messages()
         except:
             self.close()
             raise exc_info()[1]
 
-        self._begin = PreparedStatement(self, "BEGIN TRANSACTION")
+        self._start = PreparedStatement(self, "START TRANSACTION")
         self._commit = PreparedStatement(self, "COMMIT TRANSACTION")
         self._rollback = PreparedStatement(self, "ROLLBACK TRANSACTION")
-        self._unnamed_prepared_statement_lock = threading.RLock()
         self.in_transaction = False
         self.notifies = []
-        self.notifies_lock = threading.Lock()
 
     def handle_ERROR_RESPONSE(self, data, ps):
         msg_dict = data_into_dict(data)
@@ -979,7 +717,6 @@ class Connection(object):
         # Int16(N) - Format codes for each column (0 text, 1 binary)
         is_binary, num_cols = bh_unpack(data)
         # column_formats = unpack_from('!' + 'h' * num_cols, data, 3)
-        assert self._sock_lock.locked()
         if ps.stream is None:
             raise CopyQueryWithoutStreamError()
 
@@ -1024,19 +761,7 @@ class Connection(object):
         # additional_info = data[idx:idx + null]
 
         # psycopg2 compatible notification interface
-        try:
-            self.notifies_lock.acquire()
-            self.notifies.append((backend_pid, condition))
-        finally:
-            self.notifies_lock.release()
-
-    ##
-    # Creates a {@link #CursorWrapper CursorWrapper} object bound to this
-    # connection.
-    # <p>
-    # Stability: Part of the DBAPI 2.0 specification.
-    def cursor(self):
-        return Cursor(self)
+        self.notifies.append((backend_pid, condition))
 
     ##
     # Commits the current database transaction.
@@ -1068,27 +793,60 @@ class Connection(object):
     # <p>
     # Stability: Part of the DBAPI 2.0 specification.
     def close(self):
-        try:
-            self._sock_lock.acquire()
-            # Byte1('X') - Identifies the message as a terminate message.
-            # Int32(4) - Message length, including self.
-            self._send_messages(TERMINATE)
-            self._sock.close()
-            self._sock = None
-        finally:
-            self._sock_lock.release()
+        # Byte1('X') - Identifies the message as a terminate message.
+        # Int32(4) - Message length, including self.
+        self._send_messages(TERMINATE)
+        self._sock.close()
+        self._sock = None
 
     ##
     # Begins a new transaction.
     # <p>
     # Stability: Added in v1.00, stability guaranteed for v1.xx.
-    def begin(self):
+    def start(self):
         if not self.in_transaction and not self.autocommit:
-            self._begin.execute()
+            self._start.execute()
             self.in_transaction = True
 
+    ##
+    # Executes a database operation.  Parameters may be provided as a sequence
+    # or mapping and will be bound to variables in the operation.
+    # <p>
+    # Stability: Part of the DBAPI 2.0 specification.
+    def execute(self, operation, values=None, stream=None):
+        stmt = PreparedStatement(
+            self, operation, values, statement_name="")
+        stmt.execute(values, stream=stream)
+        return stmt
+
+    def copy_from(self, fileobj, table=None, sep='\t', null=None, query=None):
+        if query is None:
+            if table is None:
+                raise CopyQueryOrTableRequiredError()
+            query = "COPY %s FROM stdout DELIMITER '%s'" % (table, sep)
+            if null is not None:
+                query += " NULL '%s'" % (null,)
+        return self.copy_execute(fileobj, query)
+
+    def copy_to(self, fileobj, table=None, sep='\t', null=None, query=None):
+        if query is None:
+            if table is None:
+                raise CopyQueryOrTableRequiredError()
+            query = "COPY %s TO stdout DELIMITER '%s'" % (table, sep)
+            if null is not None:
+                query += " NULL '%s'" % (null,)
+        return self.copy_execute(fileobj, query)
+
+    def copy_execute(self, fileobj, query):
+        return self.execute(query, stream=fileobj)
+
+    def executemany(self, operation, parameter_sets):
+        stmt = PreparedStatement(
+            self, operation, parameter_sets[0], statement_name="")
+        stmt.executemany(parameter_sets)
+        return stmt
+
     def handle_AUTHENTICATION_REQUEST(self, data, ps):
-        assert self._sock_lock.locked()
         # Int32 -   An authentication code that represents different
         #           authentication messages:
         #               0 = AuthenticationOk
@@ -1205,102 +963,93 @@ class Connection(object):
             self.send_EXECUTE(ps, PreparedStatement.row_cache_size)
 
     def parse(self, ps, statement):
-        try:
-            self._sock_lock.acquire()
-            statement_name = ps.statement_name.encode('ascii')
-            # Byte1('P') - Identifies the message as a Parse command.
-            # Int32 -   Message length, including self.
-            # String -  Prepared statement name. An empty string selects the
-            #           unnamed prepared statement.
-            # String -  The query string.
-            # Int16 -   Number of parameter data types specified (can be zero).
-            # For each parameter:
-            #   Int32 - The OID of the parameter data type.
-            val = bytearray(statement_name + b("\x00"))
-            val.extend(statement.encode(self._client_encoding) + b("\x00"))
-            val.extend(h_pack(len(ps.params)))
-            for oid, fc, send_func in ps.params:
-                # Parse message doesn't seem to handle the -1 type_oid for NULL
-                # values that other messages handle.  So we'll provide type_oid
-                # 705, the PG "unknown" type.
-                if oid == -1:
-                    oid = 705
-                val.extend(i_pack(oid))
+        statement_name = ps.statement_name.encode('ascii')
+        # Byte1('P') - Identifies the message as a Parse command.
+        # Int32 -   Message length, including self.
+        # String -  Prepared statement name. An empty string selects the
+        #           unnamed prepared statement.
+        # String -  The query string.
+        # Int16 -   Number of parameter data types specified (can be zero).
+        # For each parameter:
+        #   Int32 - The OID of the parameter data type.
+        val = bytearray(statement_name + b("\x00"))
+        val.extend(statement.encode(self._client_encoding) + b("\x00"))
+        val.extend(h_pack(len(ps.params)))
+        for oid, fc, send_func in ps.params:
+            # Parse message doesn't seem to handle the -1 type_oid for NULL
+            # values that other messages handle.  So we'll provide type_oid
+            # 705, the PG "unknown" type.
+            if oid == -1:
+                oid = 705
+            val.extend(i_pack(oid))
 
-            # Byte1('D') - Identifies the message as a describe command.
-            # Int32 - Message length, including self.
-            # Byte1 - 'S' for prepared statement, 'P' for portal.
-            # String - The name of the item to describe.
-            desc_data = bytearray(b("S") + statement_name + b('\x00'))
-            self._send_messages(
-                (PARSE, val), (DESCRIBE, desc_data), SYNC, FLUSH)
-            self.handle_messages(ps)
-        finally:
-            self._sock_lock.release()
+        # Byte1('D') - Identifies the message as a describe command.
+        # Int32 - Message length, including self.
+        # Byte1 - 'S' for prepared statement, 'P' for portal.
+        # String - The name of the item to describe.
+        desc_data = bytearray(b("S") + statement_name + b('\x00'))
+        self._send_messages(
+            (PARSE, val), (DESCRIBE, desc_data), SYNC, FLUSH)
+        self.handle_messages(ps)
 
     def bind(self, ps, values):
-        try:
-            self._sock_lock.acquire()
-            self.binding = True
-            if ps.statement_row_desc is None:
-                # no data going out
-                output_fc = ()
-            else:
-                # We've got row_desc that allows us to identify what we're
-                # going to get back from this statement.
-                output_fc = tuple(
-                    self.pg_types[f['type_oid']][0] for f in
-                    ps.statement_row_desc)
+        self.binding = True
+        if ps.statement_row_desc is None:
+            # no data going out
+            output_fc = ()
+        else:
+            # We've got row_desc that allows us to identify what we're
+            # going to get back from this statement.
+            output_fc = tuple(
+                self.pg_types[f['type_oid']][0] for f in
+                ps.statement_row_desc)
 
-            statement_name_bin = ps.statement_name.encode('ascii')
-            portal_name_bin = ps.portal_name.encode('ascii')
+        statement_name_bin = ps.statement_name.encode('ascii')
+        portal_name_bin = ps.portal_name.encode('ascii')
 
-            # Byte1('B') - Identifies the Bind command.
-            # Int32 - Message length, including self.
-            # String - Name of the destination portal.
-            # String - Name of the source prepared statement.
-            # Int16 - Number of parameter format codes.
-            # For each parameter format code:
-            #   Int16 - The parameter format code.
-            # Int16 - Number of parameter values.
-            # For each parameter value:
-            #   Int32 - The length of the parameter value, in bytes, not
-            #           including this length.  -1 indicates a NULL parameter
-            #           value, in which no value bytes follow.
-            #   Byte[n] - Value of the parameter.
-            # Int16 - The number of result-column format codes.
-            # For each result-column format code:
-            #   Int16 - The format code.
-            retval = bytearray(portal_name_bin + b("\x00"))
-            retval.extend(statement_name_bin + b("\x00"))
-            retval.extend(h_pack(len(ps.params)))
-            retval.extend(
-                pack(
-                    "!" + "h" * len(ps.params),
-                    *tuple(map(itemgetter(1), ps.params))))
-            retval.extend(h_pack(len(ps.params)))
-            for value, (oid, fc, send_func) in zip(values, ps.params):
-                val = send_func(value)
-                if oid != -1:
-                    retval.extend(i_pack(len(val)))
-                retval.extend(val)
-            retval.extend(h_pack(len(output_fc)))
-            retval.extend(pack("!" + "h" * len(output_fc), *output_fc))
+        # Byte1('B') - Identifies the Bind command.
+        # Int32 - Message length, including self.
+        # String - Name of the destination portal.
+        # String - Name of the source prepared statement.
+        # Int16 - Number of parameter format codes.
+        # For each parameter format code:
+        #   Int16 - The parameter format code.
+        # Int16 - Number of parameter values.
+        # For each parameter value:
+        #   Int32 - The length of the parameter value, in bytes, not
+        #           including this length.  -1 indicates a NULL parameter
+        #           value, in which no value bytes follow.
+        #   Byte[n] - Value of the parameter.
+        # Int16 - The number of result-column format codes.
+        # For each result-column format code:
+        #   Int16 - The format code.
+        retval = bytearray(portal_name_bin + b("\x00"))
+        retval.extend(statement_name_bin + b("\x00"))
+        retval.extend(h_pack(len(ps.params)))
+        retval.extend(
+            pack(
+                "!" + "h" * len(ps.params),
+                *tuple(map(itemgetter(1), ps.params))))
+        retval.extend(h_pack(len(ps.params)))
+        for value, (oid, fc, send_func) in zip(values, ps.params):
+            val = send_func(value)
+            if oid != -1:
+                retval.extend(i_pack(len(val)))
+            retval.extend(val)
+        retval.extend(h_pack(len(output_fc)))
+        retval.extend(pack("!" + "h" * len(output_fc), *output_fc))
 
-            # We need to describe the portal after bind, since the return
-            # format codes will be different (hopefully, always what we
-            # requested).
+        # We need to describe the portal after bind, since the return
+        # format codes will be different (hopefully, always what we
+        # requested).
 
-            # Byte1('D') - Identifies the message as a describe command.
-            # Int32 - Message length, including self.
-            # Byte1 - 'S' for prepared statement, 'P' for portal.
-            # String - The name of the item.
-            val = bytearray(b('P') + portal_name_bin + b('\x00'))
-            assert self._sock_lock.locked()
-            self._send_messages((BIND, retval), (DESCRIBE, val), FLUSH)
-            self.handle_messages(ps)
-        finally:
-            self._sock_lock.release()
+        # Byte1('D') - Identifies the message as a describe command.
+        # Int32 - Message length, including self.
+        # Byte1 - 'S' for prepared statement, 'P' for portal.
+        # String - The name of the item.
+        val = bytearray(b('P') + portal_name_bin + b('\x00'))
+        self._send_messages((BIND, retval), (DESCRIBE, val), FLUSH)
+        self.handle_messages(ps)
 
     def _send_messages(self, *messages):
         try:
@@ -1335,7 +1084,6 @@ class Connection(object):
         self._send_messages((EXECUTE, val), SYNC, FLUSH)
 
     def handle_NO_DATA(self, msg, ps):
-        assert self._sock_lock.locked()
         if ps is None:
             raise InternalError("Unexpected response msg " + NO_DATA)
 
@@ -1376,7 +1124,6 @@ class Connection(object):
         ps._cached_rows.append(row)
 
     def handle_messages(self, prepared_statement=None):
-        assert self._sock_lock.locked()
         message_code = None
         error = None
         while message_code != READY_FOR_QUERY:
@@ -1408,20 +1155,12 @@ class Connection(object):
         return self._make_CLOSE(b("P"), ps)
 
     def close_statement(self, ps):
-        try:
-            self._sock_lock.acquire()
-            self._send_messages(self._make_CLOSE(b("S"), ps), SYNC)
-            self.handle_messages(ps)
-        finally:
-            self._sock_lock.release()
+        self._send_messages(self._make_CLOSE(b("S"), ps), SYNC)
+        self.handle_messages(ps)
 
     def close_portal(self, ps):
-        try:
-            self._sock_lock.acquire()
-            self._send_messages(self._make_CLOSE_portal(ps), SYNC)
-            self.handle_messages(ps)
-        finally:
-            self._sock_lock.release()
+        self._send_messages(self._make_CLOSE_portal(ps), SYNC)
+        self.handle_messages(ps)
 
     def handle_NOTICE_RESPONSE(self, data, ps):
         resp = data_into_dict(data)
@@ -1712,12 +1451,12 @@ def array_dim_lengths(arr):
 #
 # @param types          Python type objects for each parameter in the SQL
 # statement.  For example, int, float, str.
-class PreparedStatement(object):
+class PreparedStatement(Iterator):
 
     ##
     # Determines the number of rows to read from the database server at once.
     # Reading more rows increases performance at the cost of memory.  The
-    # default value is 100 rows.  The affect of this parameter is transparent.
+    # default value is 100 rows.  The effect of this parameter is transparent.
     # That is, the library reads more rows when the cache is empty
     # automatically.
     # <p>
@@ -1727,19 +1466,13 @@ class PreparedStatement(object):
     row_cache_size = 100
 
     def __init__(self, connection, query, values=None, statement_name=None):
+        self.c = connection
 
-        # Stability: Added in v1.03, stability guaranteed for v1.xx.
         self.row_count = -1
 
-        global statement_number
-        try:
-            statement_number_lock.acquire()
-            self._statement_number = statement_number
-            statement_number += 1
-        finally:
-            statement_number_lock.release()
+        self._statement_number = self.c.statement_number
+        self.c.statement_number += 1
 
-        self.c = connection
         self.portal_name = None
         if statement_name is None:
             self.statement_name = "pg8000_statement_" + \
@@ -1752,7 +1485,6 @@ class PreparedStatement(object):
         self.param_fcs = tuple(x[1] for x in self.params)
         self.statement_row_desc = None
         self.c.parse(self, self.statement)
-        self._lock = threading.RLock()
         self.cmd = None
 
     def close(self):
@@ -1761,39 +1493,167 @@ class PreparedStatement(object):
         if self.portal_name is not None:
             self.c.close_portal(self)
             self.portal_name = None
-
-    def get_row_description(self):
-        if self.portal_row_desc is not None:
-            return self.portal_row_desc
-        return self.statment_row_desc
+        self.c = None
 
     ##
     # Run the SQL prepared statement with the given parameters.
     # <p>
     # Stability: Added in v1.00, stability guaranteed for v1.xx.
     def execute(self, values=None, stream=None):
-        try:
-            self._lock.acquire()
+        # cleanup last execute
+        self._cached_rows.clear()
+        self.row_count = -1
+        if self.statement != 'START TRANSACTION':
+            self.c.start()
+        self.portal_suspended = False
+        self.portal_name = "pg8000_portal_" + str(self.c.portal_number)
+        self.c.portal_number += 1
+
+        self.cmd = None
+        self.stream = stream
+        self.portal_row_desc = None
+        self.c.bind(self, self.make_args(values))
+
+    ##
+    # This read-only attribute returns a reference to the connection object on
+    # which the cursor was created.
+    # <p>
+    # Stability: Part of a DBAPI 2.0 extension.  A warning "DB-API extension
+    # cursor.connection used" will be fired.
+    @property
+    def connection(self):
+        warn("DB-API extension cursor.connection used", stacklevel=3)
+        return self._conn
+
+    ##
+    # This read-only attribute specifies the number of rows that the last
+    # .execute*() produced (for DQL statements like 'select') or affected (for
+    # DML statements like 'update' or 'insert').
+    # <p>
+    # The attribute is -1 in case no .execute*() has been performed on the
+    # cursor or the rowcount of the last operation is cannot be determined by
+    # the interface.
+    # <p>
+    # Stability: Part of the DBAPI 2.0 specification.
+    @property
+    def rowcount(self):
+        return self.row_count
+
+    ##
+    # This read-only attribute is a sequence of 7-item sequences.  Each value
+    # contains information describing one result column.  The 7 items returned
+    # for each column are (name, type_code, display_size, internal_size,
+    # precision, scale, null_ok).  Only the first two values are provided by
+    # this interface implementation.
+    # <p>
+    # Stability: Part of the DBAPI 2.0 specification.
+    @property
+    def description(self):
+        if self.statement_row_desc is None:
+            row_desc = self.portal_row_desc
+        else:
+            row_desc = self.statement_row_desc
+
+        if row_desc is None or len(row_desc) == 0:
+            return None
+
+        columns = []
+        for col in row_desc:
+            columns.append(
+                (col["name"], col["type_oid"], None, None, None, None, None))
+        return columns
+
+    ##
+    # Prepare a database operation and then execute it against all parameter
+    # sequences or mappings provided.
+    # <p>
+    # Stability: Part of the DBAPI 2.0 specification.
+    def executemany(self, parameter_sets):
+        self._cached_rows.clear()
+        self.row_count = -1
+        if self.statement != 'START TRANSACTION':
+            self.c.start()
+        for parameters in parameter_sets:
             # cleanup last execute
-            self._cached_rows.clear()
-            self.row_count = -1
             self.portal_suspended = False
-            try:
-                portal_number_lock.acquire()
-                global portal_number
-                self.portal_name = "pg8000_portal_" + str(portal_number)
-                portal_number += 1
-            finally:
-                portal_number_lock.release()
+            self.portal_name = "pg8000_portal_" + str(self.c.portal_number)
+            self.c.portal_number += 1
 
             self.cmd = None
-            self.stream = stream
             self.portal_row_desc = None
-            self.c.bind(self, self.make_args(values))
-            if len(self.portal_row_desc) == 0:
-                self.c.close_portal(self)
-        finally:
-            self._lock.release()
+            self.c.bind(self, self.make_args(parameters))
+
+    def copy_from(self, fileobj, table=None, sep='\t', null=None, query=None):
+        if query is None:
+            if table is None:
+                raise CopyQueryOrTableRequiredError()
+            query = "COPY %s FROM stdout DELIMITER '%s'" % (table, sep)
+            if null is not None:
+                query += " NULL '%s'" % (null,)
+        self.copy_execute(fileobj, query)
+
+    def copy_to(self, fileobj, table=None, sep='\t', null=None, query=None):
+        if query is None:
+            if table is None:
+                raise CopyQueryOrTableRequiredError()
+            query = "COPY %s TO stdout DELIMITER '%s'" % (table, sep)
+            if null is not None:
+                query += " NULL '%s'" % (null,)
+        self.copy_execute(fileobj, query)
+
+    def copy_execute(self, fileobj, query):
+        self.execute(query, stream=fileobj)
+
+    ##
+    # Fetch the next row of a query result set, returning a single sequence, or
+    # None when no more data is available.
+    # <p>
+    # Stability: Part of the DBAPI 2.0 specification.
+    def fetchone(self):
+        try:
+            return next(self)
+        except StopIteration:
+            return None
+
+    ##
+    # Fetch the next set of rows of a query result, returning a sequence of
+    # sequences.  An empty sequence is returned when no more rows are
+    # available.
+    # <p>
+    # Stability: Part of the DBAPI 2.0 specification.
+    # @param size   The number of rows to fetch when called.  If not provided,
+    #               the arraysize property value is used instead.
+    def fetchmany(self, num=1):
+        return tuple(islice(self, num))
+
+    ##
+    # Fetch all remaining rows of a query result, returning them as a sequence
+    # of sequences.
+    # <p>
+    # Stability: Part of the DBAPI 2.0 specification.
+    def fetchall(self):
+        return tuple(self)
+
+    def __next__(self):
+        try:
+            return self._cached_rows.popleft()
+        except IndexError:
+            if self.portal_suspended:
+                self.c.send_EXECUTE(
+                    self, PreparedStatement.row_cache_size)
+                self.c.handle_messages(self)
+
+            try:
+                return self._cached_rows.popleft()
+            except IndexError:
+                if len(self.portal_row_desc) == 0:
+                    raise ProgrammingError("no result set")
+                raise StopIteration()
+        except AttributeError:
+            raise ProgrammingError("attempting to use unexecuted cursor")
+
+    def __iter__(self):
+        return self
 
 
 def inspect_int(value):

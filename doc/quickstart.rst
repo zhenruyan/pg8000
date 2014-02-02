@@ -20,28 +20,27 @@ Interactive Example
 
     >>> conn = pg8000.connect(user="postgres", password="C.P.Snow")
 
-    >>> cursor = conn.cursor()
-    >>> cursor.execute("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+    >>> ps = conn.execute("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
 
-    >>> results = cursor.execute(
+    >>> ps = conn.execute(
     ...     "INSERT INTO book (title) VALUES (:1), (:2) RETURNING id, title",
     ...     ("Ender's Game", "Speaker for the Dead"))
-    >>> for row in results:
+    >>> for row in ps:
     ...     id, title = row
     ...     print("id = %s, title = %s" % (id, title))
     id = 1, title = Ender's Game
     id = 2, title = Speaker for the Dead
     >>> conn.commit()
 
-    >>> cursor.execute("SELECT extract(millennium from now())").fetchone()
+    >>> conn.execute("SELECT extract(millennium from now())").fetchone()
     [3.0]
 
     >>> import datetime
-    >>> cursor.execute("SELECT timestamp '2013-12-01 16:06' - :1",
+    >>> conn.execute("SELECT timestamp '2013-12-01 16:06' - :1",
     ... (datetime.date(1980, 4, 27),)).fetchone()
     [<Interval 0 months 12271 days 57960000000 microseconds>]
 
-    >>> cursor.execute("SELECT array_prepend(:1, :2)",
+    >>> conn.execute("SELECT array_prepend(:1, :2)",
     ... ( 500, [1, 2, 3, 4], )).fetchone()
     [[500, 1, 2, 3, 4]]
     >>> conn.rollback()
@@ -50,9 +49,7 @@ Interactive Example
     turned on by using the autocommit property of the connection.
 
     >>> conn.autocommit = True
-    >>> cur = conn.cursor()
-    >>> cur.execute("vacuum")
+    >>> ps = conn.execute("vacuum")
     >>> conn.autocommit = False
     
-    >>> cursor.close()
     >>> conn.close()

@@ -149,13 +149,7 @@ def connect(
 ##
 # The DBAPI level supported.  Currently 2.0.  This property is part of the
 # DBAPI 2.0 specification.
-apilevel = "2.0"
-
-##
-# Integer constant stating the level of thread safety the DBAPI interface
-# supports.  This DBAPI interface supports sharing of the module and
-# connections.  This property is part of the DBAPI 2.0 specification.
-threadsafety = 3
+apilevel = "3.0"
 
 ##
 # String property stating the type of parameter marker formatting expected by

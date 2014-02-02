@@ -30,33 +30,26 @@ class Tests(unittest.TestCase):
             orig[0], orig[1], self.raiseException)
 
         try:
-            c = self.db.cursor()
             try:
-                try:
-                    c.execute("SELECT :1 as f1", (datetime.time(10, 30),))
-                    c.fetchall()
-                    # shouldn't get here, exception should be thrown
-                    self.fail()
-                except TestException:
-                    # should be TestException type, this is OK!
-                    self.db.rollback()
-            finally:
-                self.db.py_types[datetime.time] = orig
-
-            # ensure that the connection is still usable for a new query
-            c.execute("VALUES (cast('hw3' as text))")
-            self.assertEqual(c.fetchone()[0], "hw3")
+                ps = self.db.execute(
+                    "SELECT :1 as f1", (datetime.time(10, 30),))
+                ps.fetchall()
+                # shouldn't get here, exception should be thrown
+                self.fail()
+            except TestException:
+                # should be TestException type, this is OK!
+                self.db.rollback()
         finally:
-            c.close()
+            self.db.py_types[datetime.time] = orig
+
+        # ensure that the connection is still usable for a new query
+        ps = self.db.execute("VALUES (cast('hw3' as text))")
+        self.assertEqual(ps.fetchone()[0], "hw3")
 
     def testNoDataErrorRecovery(self):
         for i in range(1, 4):
             try:
-                try:
-                    cursor = self.db.cursor()
-                    cursor.execute("DROP TABLE t1")
-                finally:
-                    cursor.close()
+                self.db.execute("DROP TABLE t1")
             except pg8000.DatabaseError:
                 e = exc_info()[1]
                 # the only acceptable error is:
@@ -66,10 +59,10 @@ class Tests(unittest.TestCase):
     def testClosedConnection(self):
         warnings.simplefilter("ignore")
         my_db = pg8000.connect(**db_connect)
-        cursor = my_db.cursor()
         my_db.close()
         self.assertRaises(
-            self.db.InterfaceError, cursor.execute, "VALUES ('hw1'::text)")
+            self.db.InterfaceError, my_db.execute,
+            "VALUES (cast('hw1' as text)")
         warnings.resetwarnings()
 
 if __name__ == "__main__":

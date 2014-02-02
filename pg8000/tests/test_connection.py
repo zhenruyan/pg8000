@@ -21,16 +21,14 @@ class Tests(unittest.TestCase):
         try:
             db = pg8000.connect(**db_connect)
             self.assertEqual(db.notifies, [])
-            cursor = db.cursor()
-            cursor.execute("LISTEN test")
-            cursor.execute("NOTIFY test")
+            db.execute("LISTEN test")
+            db.execute("NOTIFY test")
             db.commit()
 
-            cursor.execute("VALUES (1, 2), (3, 4), (5, 6)")
+            db.execute("VALUES (1, 2), (3, 4), (5, 6)")
             self.assertEqual(len(db.notifies), 1)
             self.assertEqual(db.notifies[0][1], "test")
         finally:
-            cursor.close()
             db.close()
 
     # This requires a line in pg_hba.conf that requires md5 for the database

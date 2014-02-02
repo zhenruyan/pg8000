@@ -4,28 +4,32 @@ This is an experimental version of PG8000 which implements some suggestions
 for [[https://wiki.python.org/moin/DbApi3|DB-API 3]]. The differences from
 DBAPI 2.0 are:
 
-* The paramstyle property is removed, and parameter labels are either :1 if the
-    arguments are a sequence, or :name if the arguments are a mapping.
+* The 'paramstyle' property is removed, and parameter labels are either :1 if
+    the arguments are a sequence, or :name if the arguments are a mapping.
+* The 'threadsafety' module parameter is removed. The thread safety level is
+    always that connections can't be shared between threads, but the module can.
+* Introduce explicit prepared statements.
 * An iterable cursor is part of the core DB-API specification, so no warning is
     given when using it.
-* The cursor's execute() method returns self, so you can iterate over the result
-    of an execute().
+* The cursor's execute() method returns 'self', so you can iterate over the
+  result of an execute().
+* The cursor's setinputsizes() and setoutputsizes() are removed.
+* The cursor's arraysize property is removed.
 
 {{{
 
 >>> import pg8000
 >>>
 >>> conn = pg8000.connect(user='postgres', password='password')
->>> cur = conn.cursor()
->>> cur.execute("create temporary table emps (id int, name varchar)")
->>> cur.execute("insert into emps values (1, 'Camilla')")
+>>> ps = conn.execute("create temporary table emps (id int, name varchar)")
+>>> conn.execute("insert into emps values (1, 'Camilla')").rowcount
 1
 >>> conn.commit()
->>> for row in cur.execute("select * from emps where id = :1", (1,)):
+>>> for row in conn.execute("select * from emps where id = :1", (1,)):
 ...     print(row)
 [1, 'Camilla']
 >>>
->>> for row in cur.execute(
+>>> for row in conn.execute(
 ...         "select * from emps where name = :name", {'name': 'Camilla'}):
 ...     print(row)
 [1, 'Camilla']
@@ -73,15 +77,13 @@ The {{{connect}}} function takes the following parameters:
 
 {{{
 
->>> cur = conn.cursor()
->>> cur.execute("create temporary table example (id int, name varchar)")
->>> cur.execute("insert into example values (1, 'hello')")
+>>> ps = conn.execute("create temporary table example (id int, name varchar)")
+>>> conn.execute("insert into example values (1, 'hello')").rowcount
 1
 >>> conn.commit()
->>> for row in cur.execute("select * from example where id = :1", (1,)):
+>>> for row in conn.execute("select * from example where id = :1", (1,)):
 ...     print(row)
 [1, 'hello']
->>> cur.close()
 >>> conn.commit()
 
 }}}
@@ -92,8 +94,7 @@ turned on by using the {{{autocommit}}} property of the connection.
 {{{
 
 >>> conn.autocommit = True
->>> cur = conn.cursor()
->>> cur.execute("vacuum")
+>>> ps = conn.execute("vacuum")
 >>> conn.autocommit = False
 
 }}}
