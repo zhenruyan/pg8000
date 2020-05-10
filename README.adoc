@@ -212,7 +212,7 @@ You might think that the following would work, but in fact it fails:
 ----
 >>> con.run("SELECT 'silo 1' LIMIT :lim", lim='ALL')
 Traceback (most recent call last):
-pg8000.core.ProgrammingError: ...
+pg8000.exceptions.ProgrammingError: ...
 >>> con.rollback()
 
 ----
@@ -238,7 +238,7 @@ for example the following fails:
 ----
 >>> con.run("CREATE USER juan WITH PASSWORD :password", password='quail')
 Traceback (most recent call last):
-pg8000.core.ProgrammingError: ...
+pg8000.exceptions.ProgrammingError: ...
 >>> con.rollback()
 
 ----
@@ -298,6 +298,61 @@ https://sqlparse.readthedocs.io/en/latest[sqlparse] library like this:
 
 
 ----
+
+
+=== Custom adapter from a Python type to a PostgreSQL type
+
+pg8000 has a mapping from Python types to PostgreSQL types for when it needs
+to send SQL parameters to the server. The default mapping that comes with
+pg8000 is designed to work well in most cases, but you might want to add or
+replace the default mapping.
+
+A Python `datetime.timedelta` object is sent to the server as a PostgreSQL
+`interval` type,  which has the `oid` 1186. But let's say we wanted to create
+our own Python class to be sent as an `interval` type. Then we'd have to
+register an adapter:
+
+>>> class MyInterval(str):
+...     pass
+>>>
+>>> def my_interval_out(my_interval):
+...     return my_interval  # Must return a str
+>>>
+>>> con.register_out_adapter(MyInterval, 1186, my_interval_out)
+>>> con.run("SELECT :interval", interval=MyInterval("2 hours"))
+([datetime.timedelta(0, 7200)],)
+
+Note that it still came back as a `datetime.timedelta` object because we only
+changed the mapping from Python to PostgreSQL. See below for an example of how
+to change the mapping from PostgreSQL to Python.
+
+
+=== Custom adapter from a PostgreSQL type to a Python type
+
+pg8000 has a mapping from PostgreSQL types to Python types for when it receives
+SQL results from the server. The default mapping that comes with pg8000 is
+designed to work well in most cases, but you might want to add or replace the
+default mapping.
+
+If pg800 recieves PostgreSQL `interval` type, which has the `oid` 1186, it
+converts it into a Python `datetime.timedelta` object. But let's say we wanted
+to create our own Python class to be used instead of `datetime.timedelta`. Then
+we'd have to register an adapter:
+
+>>> class MyInterval(str):
+...     pass
+>>>
+>>> def my_interval_in(my_interval_str):  # The parameter is of type str
+...     return MyInterval(my_interval)
+>>>
+>>> con.register_in_adapter(1186, my_interval_in)
+>>> con.run("SELECT \'2 years'")
+(['2 years'],)
+
+
+Note that registering the 'in' adapter only afects the mapping from the
+PostgreSQL type to the Python type. See above for an example of how to change
+the mapping from PostgreSQL to Python.
 
 
 == DB-API 2 Interactive Examples
@@ -535,12 +590,13 @@ b'1\telectron\n2\tmuon\n3\ttau\n'
 
 == Type Mapping
 
-The following table shows the mapping between Python types and PostgreSQL
-types, and vice versa.
+The following table shows the default mapping between Python types and
+PostgreSQL types, and vice versa.
 
 If pg8000 doesn't recognize a type that it receives from PostgreSQL, it will
 return it as a `str` type. This is how pg8000 handles PostgreSQL `enum` and
-XML types.
+XML types. It's possible to change the default mapping using adapters (see the
+examples).
 
 .Python to PostgreSQL Type Mapping
 |===
@@ -588,8 +644,7 @@ XML types.
 
 | datetime.timedelta
 | interval
-| datetime.timedelta is used unless the interval has months, in which case
-  pg8000.Interval is used
+|
 
 | None
 | NULL
@@ -679,30 +734,13 @@ statements. It uses the Extended Query feature of the FEBE. So the steps are:
 
 There are a lot of PostgreSQL data types, but few primitive data types in
 Python. A PostgreSQL data type has to be assigned to each query parameter,
-which is impossible to work out in all cases. In these cases a wrapper class
-can be used for the parameter to indicate its type, or an
+which is impossible to work out in all cases. In these cases an adapter can be
+used for the parameter to indicate its type, or sometimes an
 https://www.postgresql.org/docs/current/static/sql-expressions.html#SQL-SYNTAX-TYPE-CASTS[explicit cast] can be used in the SQL.
 
 In the FEBE protocol, each query parameter can be sent to the server either as
-binary or text according to the format code (FC). In pg8000 the FC depends
-on the type of the value. Here is a table of some common types and their FC:
-
-.Python Type to FC Mapping
-|===
-| Python Type                       | FC
-
-| None                              | binary
-| bool                              | binary
-| int                               | binary
-| float                             | binary
-| datetime.date                     | text
-| datetime.time                     | text
-| datetime.datetime (naive)         | binary
-| datetime.datetime (with timezone) | binary
-| datetime.timedelta                | binary
-| decimal.Decimal                   | text
-| uuid                              | binary
-|===
+binary or text according to the format code. In pg8000 the parameters are
+always sent as text.
 
 * Since pg8000 uses prepared statements implicitly, there's nothing to be
   gained by using them explicitly with the SQL PREPARE, EXECUTE and DEALLOCATE
@@ -1132,6 +1170,37 @@ Closes the database connection.
 
 This function is part of the
 http://www.python.org/dev/peps/pep-0249/[DBAPI 2.0 specification].
+
+
+===== pg8000.Connection.register_out_adapter(typ, oid, out_func)
+
+Register a type adapter for types going out from pg8000 to the server.
+
+typ::
+  The Python class that the adapter is for.
+
+oid::
+  The PostgreSQL type identifier found in the
+  https://www.postgresql.org/docs/current/catalog-pg-type.html[pg_type system
+  calalog].
+
+out_func::
+  A function that takes the Python object and returns its string representation
+  in the format that the server requires.
+
+
+===== pg8000.Connection.register_in_adapter(oid, in_func)
+
+Register a type adapter for types coming in from the server to pg8000.
+
+oid::
+  The PostgreSQL type identifier found in the
+  https://www.postgresql.org/docs/current/catalog-pg-type.html[pg_type system
+  calalog].
+
+in_func::
+  A function that takes the PostgreSQL string representation and returns
+  a corresponding Python object.
 
 
 ===== pg8000.Connection.cursor()

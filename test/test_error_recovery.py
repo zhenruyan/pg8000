@@ -19,7 +19,7 @@ def test_py_value_fail(con, mocker):
     orig = con.py_types[datetime.time]
     mocker.patch.object(con, 'py_types')
     con.py_types = {
-        datetime.time: (orig[0], orig[1], raise_exception)
+        datetime.time: (orig[0], raise_exception)
     }
 
     with con.cursor() as c, pytest.raises(PG8000TestException):

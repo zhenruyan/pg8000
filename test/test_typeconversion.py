@@ -14,6 +14,7 @@ from collections import OrderedDict
 import pytest
 from enum import Enum
 import ipaddress
+from pg8000 import converters
 
 
 # Type conversion tests
@@ -207,15 +208,29 @@ def test_timestamp_roundtrip(is_java, cursor):
         time.tzset()
 
 
-def test_interval_roundtrip(cursor):
-    v = pg8000.Interval(microseconds=123456789, days=2, months=24)
-    cursor.execute("SELECT %s as f1", (v,))
-    retval = cursor.fetchall()
+def test_interval_repr():
+    v = pg8000.PGInterval(microseconds=123456789, days=2, months=24)
+    assert repr(v) == '<PGInterval 24 months 2 days 123456789 microseconds>'
+
+
+def test_interval_in_1_year():
+    assert converters.pginterval_in('1 year') == pg8000.PGInterval(years=1)
+
+
+def test_timedelta_in_2_months():
+    assert converters.timedelta_in('2 hours')
+
+
+def test_interval_roundtrip(con):
+    con.register_in_adapter(1186, converters.pginterval_in)
+    v = pg8000.PGInterval(microseconds=123456789, days=2, months=24)
+    retval = con.run("SELECT :v as f1", v=v)
     assert retval[0][0] == v
 
+
+def test_timedelta_roundtrip(con):
     v = Timedelta(seconds=30)
-    cursor.execute("SELECT %s as f1", (v,))
-    retval = cursor.fetchall()
+    retval = con.run("SELECT :v as f1", v=v)
     assert retval[0][0] == v
 
 
@@ -396,7 +411,7 @@ def test_oid_out(cursor):
     # It is sufficient that no errors were encountered.
 
 
-def test_boolean_out(cursor):
+def test_boolean_in(cursor):
     retval = tuple(cursor.execute("SELECT cast('t' as bool)"))
     assert retval[0][0]
 
@@ -424,7 +439,7 @@ def test_int8_out(cursor):
 
 def test_float4_out(cursor):
     retval = tuple(cursor.execute("SELECT 1.1::real"))
-    assert retval[0][0] == 1.1000000238418579
+    assert retval[0][0] == 1.1
 
 
 def test_float8_out(cursor):
@@ -447,20 +462,23 @@ def test_text_out(cursor):
     assert retval[0][0] == "hello"
 
 
-def test_interval_out(cursor):
-    retval = tuple(
-        cursor.execute(
-            "SELECT '1 month 16 days 12 hours 32 minutes 64 seconds'"
-            "::interval"))
-    expected_value = pg8000.Interval(
+def test_interval_in(con):
+    con.register_in_adapter(1186, pg8000.converters.pginterval_in)
+    retval = con.run(
+        "SELECT '1 month 16 days 12 hours 32 minutes 64 seconds'::interval")
+    expected_value = pg8000.PGInterval(
         microseconds=(12 * 60 * 60 * 1000 * 1000) +
         (32 * 60 * 1000 * 1000) + (64 * 1000 * 1000), days=16, months=1)
     assert retval[0][0] == expected_value
 
-    retval = tuple(cursor.execute("select interval '30 seconds'"))
+
+def test_interval_in_30_seconds(con):
+    retval = con.run("select interval '30 seconds'")
     assert retval[0][0] == Timedelta(seconds=30)
 
-    retval = tuple(cursor.execute("select interval '12 days 30 seconds'"))
+
+def test_interval_in_12_days_30_seconds(con):
+    retval = con.run("select interval '12 days 30 seconds'")
     assert retval[0][0] == Timedelta(days=12, seconds=30)
 
 
@@ -468,21 +486,6 @@ def test_timestamp_out(cursor):
     cursor.execute("SELECT '2001-02-03 04:05:06.17'::timestamp")
     retval = cursor.fetchall()
     assert retval[0][0] == Datetime(2001, 2, 3, 4, 5, 6, 170000)
-
-
-# confirms that pg8000's binary output methods have the same output for
-# a data type as the PG server
-def test_binary_output_methods(con):
-    with con.cursor() as cursor:
-        methods = (
-            ("float8send", 22.2),
-            ("timestamp_send", Datetime(2001, 2, 3, 4, 5, 6, 789)),
-            ("byteasend", pg8000.Binary(b"\x01\x02")),
-            ("interval_send", pg8000.Interval(1234567, 123, 123)),)
-        for method_out, value in methods:
-            cursor.execute("SELECT %s(%%s) as f1" % method_out, (value,))
-            retval = cursor.fetchall()
-            assert retval[0][0] == con.make_params((value,))[0][2](value)
 
 
 def test_int4_array_out(cursor):
@@ -596,21 +599,24 @@ def test_bool_array_roundtrip(cursor):
     assert retval[0][0] == [True, False, None]
 
 
-def test_string_array_out(cursor):
-    cursor.execute("SELECT '{a,b,c}'::TEXT[] AS f1")
-    assert cursor.fetchone()[0] == ["a", "b", "c"]
-    cursor.execute("SELECT '{a,b,c}'::CHAR[] AS f1")
-    assert cursor.fetchone()[0] == ["a", "b", "c"]
-    cursor.execute("SELECT '{a,b,c}'::VARCHAR[] AS f1")
-    assert cursor.fetchone()[0] == ["a", "b", "c"]
-    cursor.execute("SELECT '{a,b,c}'::CSTRING[] AS f1")
-    assert cursor.fetchone()[0] == ["a", "b", "c"]
-    cursor.execute("SELECT '{a,b,c}'::NAME[] AS f1")
-    assert cursor.fetchone()[0] == ["a", "b", "c"]
-    cursor.execute("SELECT '{}'::text[];")
-    assert cursor.fetchone()[0] == []
-    cursor.execute("SELECT '{NULL,\"NULL\",NULL,\"\"}'::text[];")
-    assert cursor.fetchone()[0] == [None, 'NULL', None, ""]
+@pytest.mark.parametrize(
+    "test_input,expected",
+    [
+        ("SELECT '{a,b,c}'::TEXT[] AS f1", ["a", "b", "c"]),
+        ("SELECT '{a,b,c}'::CHAR[] AS f1", ["a", "b", "c"]),
+        ("SELECT '{a,b,c}'::VARCHAR[] AS f1", ["a", "b", "c"]),
+        ("SELECT '{a,b,c}'::CSTRING[] AS f1", ["a", "b", "c"]),
+        ("SELECT '{a,b,c}'::NAME[] AS f1", ["a", "b", "c"]),
+        ("SELECT '{}'::text[];", []),
+        (
+            "SELECT '{NULL,\"NULL\",NULL,\"\"}'::text[];",
+            [None, 'NULL', None, ""]
+        )
+    ]
+)
+def test_string_array_out(con, test_input, expected):
+    result = con.run(test_input)
+    assert result[0][0] == expected
 
 
 def test_numeric_array_out(cursor):
@@ -625,13 +631,20 @@ def test_numeric_array_roundtrip(cursor):
     assert retval[0][0] == v
 
 
-def test_string_array_roundtrip(cursor):
+def test_string_array_roundtrip(con):
     v = [
         "Hello!", "World!", "abcdefghijklmnopqrstuvwxyz", "",
         "A bunch of random characters:",
         " ~!@#$%^&*()_+`1234567890-=[]\\{}|{;':\",./<>?\t", None]
-    retval = tuple(cursor.execute("SELECT %s as f1", (v,)))
+    retval = con.run("SELECT :v as f1", v=v)
+    print(retval[0][0], v)
     assert retval[0][0] == v
+
+
+def test_walk_array(cursor):
+    ar = ["\""]
+    res = pg8000.core._walk_array(ar, str, str)
+    assert res == '{"\\""}'
 
 
 def test_empty_array(cursor):
@@ -655,14 +668,14 @@ def test_array_dimensions(con):
             [[[[1]]], [[[2]]], [[[3, 4]]]],
             [[1, 2, 3], [4, [5], 6]]):
 
-        arr_send = con.array_inspect(arr)[2]
+        arr_send = con.array_inspect(arr)[1]
         with pytest.raises(pg8000.ArrayDimensionsNotConsistentError):
             arr_send(arr)
 
 
 def test_array_homogenous(con):
     arr = [[[1]], [[2]], [[3.1]]]
-    arr_send = con.array_inspect(arr)[2]
+    arr_send = con.array_inspect(arr)[1]
     with pytest.raises(pg8000.ArrayContentNotHomogenousError):
         arr_send(arr)
 
@@ -742,11 +755,6 @@ def test_jsonb_access_path(cursor):
 
     retval = tuple(cursor.execute("SELECT %s #>> %s", [PGJsonb(j), path]))
     assert retval[0][0] == str(j[path[0]][int(path[1])])
-
-
-def test_timestamp_send_float():
-    assert b'A\xbe\x19\xcf\x80\x00\x00\x00' == \
-        pg8000.core.timestamp_send_float(Datetime(2016, 1, 2, 0, 0))
 
 
 def test_infinity_timestamp_roundtrip(cursor):

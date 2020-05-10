@@ -1,10 +1,13 @@
-from pg8000.core import (
+from pg8000.core import Connection, Cursor
+from pg8000.exceptions import (
     Warning, DataError, DatabaseError, InterfaceError, ProgrammingError,
     Error, OperationalError, IntegrityError, InternalError, NotSupportedError,
     ArrayContentNotHomogenousError, ArrayDimensionsNotConsistentError,
-    ArrayContentNotSupportedError, Connection, Cursor, Binary, Date,
-    DateFromTicks, Time, TimeFromTicks, Timestamp, TimestampFromTicks, BINARY,
-    Interval, PGEnum, PGJson, PGJsonb, PGTsvector, PGText, PGVarchar)
+    ArrayContentNotSupportedError)
+from pg8000.converters import (
+    Binary, Date, DateFromTicks, Time, TimeFromTicks, Timestamp,
+    TimestampFromTicks, BINARY, PGInterval, PGEnum, PGJson, PGJsonb,
+    PGTsvector, PGText, PGVarchar)
 from ._version import get_versions
 __version__ = get_versions()['version']
 del get_versions
@@ -98,7 +101,7 @@ __all__ = [
     NotSupportedError, ArrayContentNotHomogenousError,
     ArrayDimensionsNotConsistentError, ArrayContentNotSupportedError,
     Connection, Cursor, Binary, Date, DateFromTicks, Time, TimeFromTicks,
-    Timestamp, TimestampFromTicks, BINARY, Interval, PGEnum, PGJson, PGJsonb,
+    Timestamp, TimestampFromTicks, BINARY, PGInterval, PGEnum, PGJson, PGJsonb,
     PGTsvector, PGText, PGVarchar]
 
 """Version string for pg8000.
