@@ -312,6 +312,9 @@ A Python `datetime.timedelta` object is sent to the server as a PostgreSQL
 our own Python class to be sent as an `interval` type. Then we'd have to
 register an adapter:
 
+[source,python]
+----
+
 >>> class MyInterval(str):
 ...     pass
 >>>
@@ -321,6 +324,8 @@ register an adapter:
 >>> con.register_out_adapter(MyInterval, 1186, my_interval_out)
 >>> con.run("SELECT :interval", interval=MyInterval("2 hours"))
 ([datetime.timedelta(0, 7200)],)
+
+----
 
 Note that it still came back as a `datetime.timedelta` object because we only
 changed the mapping from Python to PostgreSQL. See below for an example of how
@@ -339,6 +344,10 @@ converts it into a Python `datetime.timedelta` object. But let's say we wanted
 to create our own Python class to be used instead of `datetime.timedelta`. Then
 we'd have to register an adapter:
 
+
+[source,python]
+----
+
 >>> class MyInterval(str):
 ...     pass
 >>>
@@ -349,6 +358,7 @@ we'd have to register an adapter:
 >>> con.run("SELECT \'2 years'")
 (['2 years'],)
 
+----
 
 Note that registering the 'in' adapter only afects the mapping from the
 PostgreSQL type to the Python type. See above for an example of how to change
